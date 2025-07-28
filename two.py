@@ -1,90 +1,107 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Flatten
-from tensorflow.keras.utils import to_categorical
+import seaborn as sns
+import missingno as msno
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.callbacks import EarlyStopping
+from sklearn.metrics import mean_squared_error
 
-# --- Step 1: Simulate Data ---
+data = {
+    'age': [19, 18, 28, 33, 32],
+    'sex': ['female', 'male', 'male', 'male', 'male'],
+    'bmi': [27.900, 33.770, 33.000, 22.705, 28.880],
+    'children': [0, 1, 3, 0, 0],
+    'smoker': ['yes', 'no', 'no', 'no', 'no'],
+    'region': ['southwest', 'southeast', 'southeast', 'northwest', 'northwest'],
+    'charges': [16884.92400, 1725.55230, 4449.46200, 21984.47061, 3866.85520]
+}
+df = pd.DataFrame(data)
+print("First few rows of the dataset:\n", df.head())
+plt.figure(figsize=(8,5))
+msno.matrix(df)
+plt.show()
+print("\nCounting missing values in each column:\n", df.isnull().sum())
+print("\nSummary of the dataset (data types and non-null counts):\n", df.info())
+print("\nSummary statistics of numerical columns:\n", df.describe())
+print("\nFirst few rows of the dataset after initial analysis:\n", df.head())
 
-# Constants
-num_samples = 1500
-image_shape = (32, 32, 3)
-num_classes = 3
+df = pd.concat([df, pd.get_dummies(df['sex'], drop_first=True)], axis=1)
+df = pd.concat([df, pd.get_dummies(df['smoker'], drop_first=True).rename(columns={'yes':'Smoker'})], axis=1)
+print("\nUnique values in the 'region' column:\n", df['region'].unique())
+df = pd.concat([df, pd.get_dummies(df['region'])], axis=1)
+print("\nFirst few rows of the dataset after encoding categorical variables:\n", df.head())
 
-# Generate random image data (values between 0 and 1)
-X = np.random.rand(num_samples, *image_shape)
+plt.figure(figsize=(8,4))
+sns.set_style('white')
+sns.countplot(x='sex', data=df, palette='GnBu')
+sns.despine(left=True)
+plt.show()
 
-# Generate random labels (0 = Young, 1 = Middle, 2 = Old)
-y = np.random.randint(0, num_classes, num_samples)
-y = to_categorical(y, num_classes=num_classes)
+plt.figure(figsize=(8,4))
+sns.set_style('white')
+sns.boxplot(x='sex', y='charges', data=df, palette='OrRd', hue='Smoker')
+sns.despine(left=True)
+plt.show()
 
-# Split data into train and validation sets
-X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(12,5))
+sns.scatterplot(x='age', y='charges', data=df, palette='coolwarm', hue='sex', ax=ax[0])
+sns.scatterplot(x='age', y='charges', data=df, palette='GnBu', hue='Smoker', ax=ax[1])
+sns.scatterplot(x='age', y='charges', data=df, palette='magma_r', hue='region', ax=ax[2])
+sns.set_style('dark')
+sns.despine(left=True)
+plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+plt.show()
 
-# --- Step 2: Build ANN Model ---
+fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(12,5))
+sns.boxplot(x='region', y='charges', data=df, palette='GnBu', hue='Smoker', ax=ax[0])
+sns.boxplot(x='region', y='charges', data=df, palette='coolwarm', hue='sex', ax=ax[1])
+plt.show()
+
+fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(12,5))
+sns.scatterplot(x='bmi', y='charges', data=df, palette='GnBu_r', hue='sex', ax=ax[0])
+sns.scatterplot(x='bmi', y='charges', data=df, palette='magma', hue='Smoker', ax=ax[1])
+sns.set_style('dark')
+sns.despine(left=True)
+plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+plt.show()
+
+df.drop(['sex', 'region', 'smoker', 'southwest'], axis=1, inplace=True)
+print("\nFirst few rows of the dataset after dropping unnecessary columns:\n", df.head())
+
+plt.figure(figsize=(10,4))
+sns.heatmap(df.corr(), cmap='OrRd')
+plt.show()
+
+X = df.drop('charges', axis=1)
+y = df['charges']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25)
+scaler = MinMaxScaler()
+X_train = scaler.fit_transform(X_train)
+X_validate = scaler.transform(X_test)
 
 model = Sequential()
+model.add(Dense(units=8, activation='relu'))
+model.add(Dense(units=3, activation='relu'))
+model.add(Dense(units=1))
+model.compile(optimizer='adam', loss='mse')
+early_stop = EarlyStopping(monitor='val_loss', mode='min', verbose=0, patience=15)
+model.fit(x=X_train, y=y_train, epochs=50, validation_data=(X_test, y_test), batch_size=128, callbacks=[early_stop])
 
-# Flatten 32x32x3 = 3072 inputs
-model.add(Flatten(input_shape=image_shape))
-
-# Hidden layer with 500 nodes and ReLU activation
-model.add(Dense(500, activation='relu'))
-
-# Output layer with 3 nodes and Softmax activation
-model.add(Dense(3, activation='softmax'))
-
-# Compile the model
-model.compile(optimizer='adam',
-              loss='categorical_crossentropy',
-              metrics=['accuracy'])
-
-# --- Step 3: Train the Model ---
-
-history = model.fit(X_train, y_train,
-                    validation_data=(X_val, y_val),
-                    epochs=10,
-                    batch_size=64)
-
-# --- Step 4: Plot Accuracy and Loss ---
-
-plt.figure(figsize=(12, 5))
-
-# Accuracy Plot
-plt.subplot(1, 2, 1)
-plt.plot(history.history['accuracy'], label='Train Accuracy', marker='o')
-plt.plot(history.history['val_accuracy'], label='Val Accuracy', marker='x')
-plt.title("Model Accuracy")
-plt.xlabel("Epoch")
-plt.ylabel("Accuracy")
-plt.legend()
-
-# Loss Plot
-plt.subplot(1, 2, 2)
-plt.plot(history.history['loss'], label='Train Loss', marker='o')
-plt.plot(history.history['val_loss'], label='Val Loss', marker='x')
-plt.title("Model Loss")
-plt.xlabel("Epoch")
+loss = pd.DataFrame(model.history.history)
+loss.plot()
+plt.title("Model Loss Over Epochs")
+plt.xlabel("Epochs")
 plt.ylabel("Loss")
-plt.legend()
-
-plt.tight_layout()
 plt.show()
 
-# --- Step 5: Predict a Random Sample ---
+pred = model.predict(X_test)
+rmse_test = np.sqrt(mean_squared_error(y_test, pred))
+print(f"Root Mean Squared Error(RMSE) on Test Data: {rmse_test}")
 
-index = np.random.randint(0, len(X_val))
-sample = X_val[index]
-true_label = np.argmax(y_val[index])
-predicted_label = np.argmax(model.predict(np.expand_dims(sample, axis=0)))
-
-labels = ["Young", "Middle", "Old"]
-print("Actual:", labels[true_label])
-print("Predicted:", labels[predicted_label])
-
-# Display the sample image
-plt.imshow(sample)
-plt.title(f"Actual: {labels[true_label]} / Predicted: {labels[predicted_label]}")
-plt.axis('off')
-plt.show()
+entry_1 = df[:][1:3].drop('charges', axis=1)
+pred = model.predict(entry_1)
+rmse_entry_1 = np.sqrt(mean_squared_error(df[:][1:3]['charges'], pred))
