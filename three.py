@@ -1,51 +1,32 @@
-# Install required libraries if needed
-# !pip install tensorflow keras matplotlib
-
+!pip install keras-tuner
 import tensorflow as tf
-from tensorflow.keras import layers, models
-import matplotlib.pyplot as plt
-import numpy as np
+from tensorflow import keras
+from tensorflow.keras import layers
+from tensorflow.keras.datasets import cifar10
+from kerastuner.tuners import RandomSearch
 
-# Load CIFAR-10 dataset directly from Keras
-(X_train, y_train), (X_test, y_test) = tf.keras.datasets.cifar10.load_data()
-X_train, X_test = X_train / 255.0, X_test / 255.0
-y_train_cat = tf.keras.utils.to_categorical(y_train, 10)
-y_test_cat = tf.keras.utils.to_categorical(y_test, 10)
-class_names = ['airplane', 'automobile', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck']
+(x_train, y_train), (x_test, y_test) = cifar10.load_data()
+x_train = x_train.astype('float32') / 255.0
+x_test = x_test.astype('float32') / 255.0
+y_train = keras.utils.to_categorical(y_train, 10)
+y_test = keras.utils.to_categorical(y_test, 10)
 
-# Define CNN model
-model = models.Sequential([
-    layers.Conv2D(32, (3,3), activation='relu', padding='same', input_shape=(32,32,3)),
-    layers.BatchNormalization(),
-    layers.MaxPooling2D(2,2),
-    layers.Conv2D(64, (3,3), activation='relu', padding='same'),
-    layers.BatchNormalization(),
-    layers.MaxPooling2D(2,2),
-    layers.Flatten(),
-    layers.Dense(10, activation='softmax')
-])
+def build_model(hp):
+    model = keras.Sequential()
+    for i in range(hp.Int('num_conv_layers', 2, 4)):
+        model.add(layers.Conv2D(hp.Int(f'conv_{i}_filters', 32, 256, 32), (3, 3), activation='relu', padding='same'))
+        model.add(layers.MaxPooling2D((2, 2)))
+    model.add(layers.Flatten())
+    for i in range(hp.Int('num_dense_layers', 1, 3)):
+        model.add(layers.Dense(units=hp.Int(f'dense_{i}_units', 64, 512, 32), activation='relu'))
+    model.add(layers.Dense(10, activation='softmax'))
+    model.compile(optimizer=keras.optimizers.Adam(hp.Choice('learning_rate', [1e-3, 1e-4])), loss='categorical_crossentropy', metrics=['accuracy'])
+    return model
 
-model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-model.summary()
-
-# Train model
-history = model.fit(X_train, y_train_cat, validation_split=0.2, epochs=5, batch_size=64)
-
-# Evaluate model
-test_loss, test_acc = model.evaluate(X_test, y_test_cat)
-print(f'\nTest Accuracy: {test_acc:.4f}')
-
-# Predict on few test images
-preds = model.predict(X_test[:10])
-pred_labels = np.argmax(preds, axis=1)
-
-# Show predictions
-plt.figure(figsize=(12,5))
-for i in range(10):
-    plt.subplot(2, 5, i+1)
-    plt.imshow(X_test[i])
-    plt.axis('off')
-    plt.title(f"P: {class_names[pred_labels[i]]}\nA: {class_names[int(y_test[i])]}")
-plt.suptitle("Predicted vs Actual")
-plt.tight_layout()
-plt.show()
+tuner = RandomSearch(build_model, objective='val_accuracy', max_trials=5, directory='hyperparameter_tuning', project_name='cifar10_tuner')
+tuner.search(x_train, y_train, epochs=1, validation_data=(x_test, y_test))
+best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
+final_model = build_model(best_hps)
+final_model.fit(x_train, y_train, epochs=1, validation_data=(x_test, y_test))
+loss, accuracy = final_model.evaluate(x_test, y_test)
+print(f'Test accuracy: {accuracy}')
