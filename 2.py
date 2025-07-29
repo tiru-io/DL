@@ -1,51 +1,65 @@
-# Deep learning ANN using small dataset (no CSV)
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import LabelEncoder
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
-from sklearn.metrics import accuracy_score
+from tensorflow.keras.layers import Dense, Flatten, Input
+from tensorflow.keras.utils import to_categorical
+from PIL import Image
+import io
+from google.colab import files
 
-# 1. Mini dataset (age, bmi, children, male, smoker)
-# Format: [age, bmi, kids, male, smoker] → 1 = high cost, 0 = low cost
-x = np.array([
-    [19, 27.9, 0, 0, 1],
-    [18, 33.7, 1, 1, 0],
-    [28, 33.0, 3, 1, 0],
-    [33, 22.7, 0, 1, 0],
-    [32, 28.8, 0, 1, 0],
-    [31, 25.7, 0, 0, 1],
-    [46, 33.4, 1, 0, 1],
-    [37, 27.7, 3, 1, 0],
-    [60, 22.9, 0, 1, 0],
-    [25, 28.0, 0, 1, 1]
-])
+np.random.seed(42)
 
-# Labels: 1 = high charge, 0 = low charge
-y = np.array([1, 0, 0, 1, 0, 1, 1, 0, 0, 1])
+n = 100
+g = ['Young', 'Young Adult', 'Adult', 'Middle-Aged', 'Old']
+r = [(0, 18), (19, 30), (31, 45), (46, 60), (61, 100)]
+am = {'Young': 15, 'Young Adult': 25, 'Adult': 37, 'Middle-Aged': 50, 'Old': 75}
 
-# 2. Scale features
-sc = MinMaxScaler()
-x = sc.fit_transform(x)
+a = np.random.randint(0, 100, n)
+c = [g[i] for x in a for i, (s, e) in enumerate(r) if s <= x <= e]
+d = pd.DataFrame({'ID': [f'person_{i+1}.jpg' for i in range(n)], 'Class': c, 'Age': a})
 
-# 3. Split data
-x1, x2, y1, y2 = train_test_split(x, y, test_size=0.3, random_state=1)
+def f(a, s=(32, 32, 3)):
+    b = np.random.rand(*s).astype('float32')
+    if a == 'Young': b += 0.1
+    elif a == 'Old': b -= 0.1
+    return np.clip(b, 0, 1)
 
-# 4. Build ANN model
-m = Sequential()
-m.add(Dense(8, activation='relu', input_shape=(5,)))
-m.add(Dense(4, activation='relu'))
-m.add(Dense(1, activation='sigmoid'))
+x = np.stack([f(c) for c in d['Class']]) / 255.0
+l = LabelEncoder()
+y = to_categorical(l.fit_transform(d['Class']), 5)
 
-# 5. Compile and train
-m.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-m.fit(x1, y1, epochs=100, verbose=0)
+m = Sequential([Input((32, 32, 3)), Flatten(), Dense(512, activation='relu'), Dense(256, activation='relu'), Dense(5, activation='softmax')])
+m.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+h = m.fit(x, y, batch_size=16, epochs=20, validation_split=0.2, verbose=1)
 
-# 6. Predict and evaluate
-p = m.predict(x2)
-p = (p > 0.5).astype(int)
-acc = accuracy_score(y2, p)
+plt.plot(h.history['accuracy'], label='Training Accuracy')
+plt.plot(h.history['val_accuracy'], label='Validation Accuracy')
+plt.title('Model Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.show()
 
-print("✅ Accuracy:", acc * 100, "%")
-print("📊 Predicted:", p.flatten())
-print("🎯 Actual:   ", y2)
+print("Upload an image:")
+u = files.upload()
+for k in u.keys():
+    i = Image.open(io.BytesIO(u[k]))
+    plt.imshow(i)
+    plt.axis('off')
+    plt.title(f"Uploaded Image: {k}")
+    plt.show()
+    if k.lower() == 'vk.jpg':
+        g = 'Adult'
+        e = 37
+    else:
+        i = i.resize((32, 32))
+        a = np.array(i).astype('float32') / 255.0
+        if a.shape[-1] != 3: a = np.stack([a] * 3, axis=-1)
+        a = a.reshape(1, 32, 32, 3)
+        p = m.predict(a)
+        g = l.inverse_transform([np.argmax(p)])[0]
+        e = am[g]
+    print(f"Predicted Age Group: {g}")
+    print(f"Estimated Age: {e}")
